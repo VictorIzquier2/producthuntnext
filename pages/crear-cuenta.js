@@ -30,7 +30,7 @@ const CrearCuenta = () => {
       Router.push('/');
     }catch(err){
       console.log('Hubo un error al crear el usuario', err);
-      guardarError(error.message);
+      setError(err.message);
 
     }
   }

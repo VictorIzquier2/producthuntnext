@@ -47,9 +47,13 @@ const Layout = props => {
             margin: 0;
             padding: 0;
           }
-
+          
           a {
             text-decoration: none;
+          }
+
+          img {
+            max-width: 100%;
           }
         `}
       />

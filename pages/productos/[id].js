@@ -20,11 +20,23 @@ const ContenedorProducto = styled.div`
   }
 `;
 
+const CreadorProducto = styled.p`
+  padding: .5rem 2rem;
+  background-color: #DA552F;
+  color: #fff;
+  text-transform: uppercase;
+  font-weight: bold;
+  display: inline-block;
+  text-align: center;
+`;
+
 const Producto = () => {
 
   // state del componente 
   const [producto, guardarProducto] = useState({});
   const [error, guardarError] = useState(false);
+  const [comentario, guardarComentario] = useState({});
+  const [consultarDB, guardarConsultarDB] = useState(true);
 
   // Routing para obtener el id actual
   const router = useRouter();
@@ -34,24 +46,125 @@ const Producto = () => {
   const {firebase, usuario} = useContext(FirebaseContext);
 
   useEffect(() => {
-    if(id){
+    if(id && consultarDB){
       const obtenerProducto = async () =>{
         const productoQuery = await firebase.db.collection('productos').doc(id);
         const producto = await productoQuery.get();
         if(producto.exists){
           guardarProducto(producto.data());
+          guardarConsultarDB(false);
         }else{
           guardarError(true);
+          guardarConsultarDB(false);
         }
       }
       obtenerProducto();
     }
-  }, [id])
+  }, [id]);
   
   if(Object.keys(producto).length === 0) return 'Cargando...';
 
-  const {comentarios, creado, descripcion, empresa, nombre, url, urlimagen, votos, creador} = producto;;
+  const {comentarios, creado, descripcion, empresa, nombre, url, urlimagen, votos, creador, haVotado} = producto;
 
+  // Administrar y validar los votos 
+  const votarProducto = () => {
+    if(!usuario) {
+      return router.push('/login');
+    }
+
+    // obtener y sumar un nuevo voto 
+    const nuevoTotal = votos + 1;
+
+    // verificar si el usuario actual ha votado 
+    if(haVotado.includes(usuario.uid)) return;
+
+    // guardar el ID del usuario que ha votado 
+    const nuevohaVotado = [...haVotado, usuario.uid];
+
+    // Actualizar en la BD 
+    firebase.db.collection('productos').doc(id).update({
+      votos: nuevoTotal, haVotado: nuevohaVotado
+    });
+
+    // Actualizar en el State
+    guardarProducto({
+      ...producto,
+      votos: nuevoTotal
+    });
+    console.log(nuevoTotal);
+
+    guardarConsultarDB(true); // hay un voto, por lo tanto consultar a la base de datos
+  }
+
+  // Funciones para crear comentarios 
+  const comentarioChange = e => {
+    guardarComentario({
+      ...comentario,
+      [e.target.name] : e.target.value
+    })
+  }
+
+  // Identificar si el comentario es el creador del producto 
+  const esCreador = id => {
+    if(creador.id == id) {
+      return true;
+    }
+  }
+
+  const agregarComentario = e => {
+    e.preventDefault();
+    if(!usuario){
+      return router.push('/login');
+    }
+
+    // informacion extra al comentario 
+    comentario.usuarioId = usuario.uid;
+    comentario.usuarioNombre = usuario.displayName;
+
+    // Tomar copia de comentarios y agregarlos al arreglo 
+    const nuevosComentarios = [...comentarios, comentario];
+
+    // Actualizar la BD 
+    firebase.db.collection('productos').doc(id).update({
+      comentarios: nuevosComentarios
+    })
+
+    // Actualizar el state 
+    guardarProducto({
+      ...producto, 
+      comentarios: nuevosComentarios
+    })
+
+    guardarConsultarDB(true);
+  }
+
+  // función que revisa que el creador del producto sea el mismo que está autenticado
+  const puedeBorrar = () => {
+    if(!usuario) return false;
+
+    if(creador.id === usuario.uid){
+      return true;
+    }
+  }
+
+  // elimina un producto de la bd 
+  const eliminarProducto = async () => {
+
+    if(!usuario) {
+      return router.push('/login')
+    }
+
+    if(creador.id !== usuario.uid) {
+      return router.push('/')
+    }
+
+    try {
+      await firebase.db.collection('productos').doc(id).delete();
+      router.push('/');
+    }catch(error) {
+      console.log(error);
+    }
+  }
 
   return ( 
     <Layout>
@@ -72,11 +185,14 @@ const Producto = () => {
               {usuario && (
                 <Fragment>
                   <h2>Agrega tu comentario</h2>
-                  <form>
+                  <form
+                    onSubmit={agregarComentario}
+                  >
                     <Campo>
                       <input
                         type='text'
                         name='mensaje'
+                        onChange={comentarioChange}
                       />
                     </Campo>
                     <InputSubmit
@@ -91,12 +207,31 @@ const Producto = () => {
                   margin: 2rem 0;
                 `}
               >Comentarios</h2>
-              {comentarios.map(comentario =>(
-                <li>
-                  <p>Escrito por: {comentario.usuarioNombre}</p>
-                  <p>{comentario.nombre}</p>
-                </li>
-              ))}
+              {comentarios.length === 0 ? "Aún no hay comentarios" : (
+                <ul>
+                {comentarios.map((comentario, i) =>(
+                  <li 
+                    key={`${comentarios.usuarioId}-${i}`}
+                    css={css`
+                      border: 1px solid #E1E1E1;
+                      padding: 2rem;
+                    `}
+                  >
+                    <p>{comentario.mensaje}</p>
+                    <p>Escrito por 
+                      <span
+                        css={css`
+                          font-weight: bold;
+                        `}
+                      >
+                        {' '}{comentario.usuarioNombre}
+                      </span>
+                    </p>
+                    {esCreador( comentario.usuarioId) && <CreadorProducto>Es Creador</CreadorProducto>}
+                  </li>
+                ))}
+                </ul>
+              )}
             </div>
             <aside>
               <Boton
@@ -111,16 +246,23 @@ const Producto = () => {
               ></div>
               <p>{votos} Votos</p>
               {usuario && (
-               <Boton>
+               <Boton
+                onClick={votarProducto}
+               >
                  votar
                </Boton>
               )}
             </aside>
           </ContenedorProducto>
+          {puedeBorrar() &&
+            <Boton
+              onClick={eliminarProducto}
+            >Eliminar Producto</Boton>
+          }
         </div>
       </Fragment>
     </Layout>
    );
 }
- 
+
 export default Producto;
